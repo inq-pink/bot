@@ -35,6 +35,9 @@ const PAGE_QUALITY = 30;
         command: 'f',
         description: 'Navigate forward',
     }, {
+        command: 'r',
+        description: 'Reload page',
+    }, {
         command: 'inqpink',
         description: 'Leave feedback',
     }]);
@@ -83,12 +86,13 @@ const PAGE_QUALITY = 30;
 
         try {
             await page.goto(url);
+            await new Promise(resolve => setTimeout(resolve, 1000));
             await markLinks(page);
 
             const { pages, screenshots } = await makeScreenshots(page);
 
             await renderBrowser(ctx, state, screenshots);
-            await renderControl(ctx, state, pages);
+            await renderControl(ctx, state, page.url());
         } catch (ex) {
             // console.error(ex);
         } finally {
@@ -107,11 +111,12 @@ const PAGE_QUALITY = 30;
 
             try {
                 await page.goBack();
+                await new Promise(resolve => setTimeout(resolve, 1000));
 
                 const { pages, screenshots } = await makeScreenshots(page);
 
                 await renderBrowser(ctx, state, screenshots);
-                await renderControl(ctx, state, pages);
+                await renderControl(ctx, state, page.url());
             } catch (ex) {
                 // console.error(ex);
             } finally {
@@ -131,11 +136,37 @@ const PAGE_QUALITY = 30;
 
             try {
                 await page.goForward();
+                await new Promise(resolve => setTimeout(resolve, 1000));
 
                 const { pages, screenshots } = await makeScreenshots(page);
 
                 await renderBrowser(ctx, state, screenshots);
-                await renderControl(ctx, state, pages);
+                await renderControl(ctx, state, page.url());
+            } catch (ex) {
+                // console.error(ex);
+            } finally {
+                await updateStatus(ctx, state, 'Enter command');
+            }
+        }
+    });
+
+    bot.command('r', async (ctx) => {
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+
+        if (pages[ctx.chat.id]) {
+            await initCommandProcessing(ctx, state);
+
+            const page = pages[ctx.chat.id];
+
+            try {
+                await page.reload();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                const { pages, screenshots } = await makeScreenshots(page);
+
+                await renderBrowser(ctx, state, screenshots);
+                await renderControl(ctx, state, page.url());
             } catch (ex) {
                 // console.error(ex);
             } finally {
@@ -162,12 +193,13 @@ const PAGE_QUALITY = 30;
                 );
 
                 await page.goto(url);
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 await markLinks(page);
 
                 const { pages, screenshots } = await makeScreenshots(page);
 
                 await renderBrowser(ctx, state, screenshots);
-                await renderControl(ctx, state, pages);
+                await renderControl(ctx, state, page.url());
             } catch (ex) {
                 // console.error(ex);
             } finally {
@@ -202,12 +234,13 @@ const PAGE_QUALITY = 30;
 
         try {
             await page.goto(url);
+            await new Promise(resolve => setTimeout(resolve, 1000));
             await markLinks(page);
 
             const { pages, screenshots } = await makeScreenshots(page);
 
             await renderBrowser(ctx, state, screenshots);
-            await renderControl(ctx, state, pages);
+            await renderControl(ctx, state, page.url());
         } catch (ex) {
             // console.error(ex);
         } finally {
@@ -276,7 +309,7 @@ const PAGE_QUALITY = 30;
                 const { pages, screenshots } = await makeScreenshots(page);
 
                 await renderBrowser(ctx, state, screenshots);
-                await renderControl(ctx, state, pages);
+                await renderControl(ctx, state, page.url());
             } catch (ex) {
                 // console.error(ex);
             } finally {
@@ -337,6 +370,10 @@ async function makeScreenshots(page) {
     const pages = Math.ceil(height / PAGE_HEIGHT * SCROLL_BY);
     const screenshots = Array(Math.min(pages, PAGE_LIMIT));
 
+    let scrollY = await page.evaluate(() =>
+        window.scrollY,
+    );
+
     for (let i = 0; i < screenshots.length; i++) {
         screenshots[i] = await page.screenshot({
             quality: PAGE_QUALITY,
@@ -346,6 +383,17 @@ async function makeScreenshots(page) {
             window.scrollBy({ top: scrollBy }),
             Math.trunc(PAGE_HEIGHT * SCROLL_BY),
         );
+
+        let newScrollY = await page.evaluate(() =>
+            window.scrollY,
+        );
+        if (scrollY !== newScrollY) {
+            scrollY = newScrollY;
+        }
+        else {
+            screenshots.splice(i);
+            break;
+        }
     }
     await page.evaluate((scrollBy) =>
         window.scrollBy({ top: scrollBy }),
@@ -369,7 +417,7 @@ async function updateStatus(ctx, state, message) {
 
 async function renderBrowser(ctx, state, screenshots) {
     const redraw = !state[ctx.chat.id].browser
-        || ctx.message.chat.type === 'private'
+        || ctx.message && ctx.message.chat.type !== 'private'
         || screenshots.length > state[ctx.chat.id].browser.length
     if (redraw) {
         await deleteBrowserIfExists(ctx, state);
@@ -424,34 +472,35 @@ async function deleteBrowserIfExists(ctx, state) {
     }
 }
 
-async function renderControl(ctx, state, pages) {
-    if (pages > PAGE_LIMIT) {
-        await upsertControl(ctx, state, pages);
-    } else {
-        await deleteControlIfExists(ctx, state);
-    }
+async function renderControl(ctx, state, url) {
+    // if (pages > PAGE_LIMIT) {
+    await upsertControl(ctx, state, url);
+    // } else {
+    //     await deleteControlIfExists(ctx, state);
+    // }
 }
 
-async function upsertControl(ctx, state, pages) {
+async function upsertControl(ctx, state, url) {
     if (!state[ctx.chat.id].control) {
         state[ctx.chat.id].control = await ctx.telegram.sendMessage(
             ctx.chat.id,
-            ...getControl(pages),
+            ...getControl(url),
         );
     } else {
         await ctx.telegram.editMessageText(
             ctx.chat.id,
             state[ctx.chat.id].control.message_id,
             undefined,
-            ...getControl(pages),
+            ...getControl(url),
         );
     }
 }
 
-function getControl(pages) {
+function getControl(url) {
     return [
-        `1 of ${Math.ceil(pages / PAGE_LIMIT)}`,
+        url,
         {
+            disable_web_page_preview: true,
             reply_markup: {
                 inline_keyboard: [
                     [
