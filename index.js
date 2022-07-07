@@ -29,9 +29,6 @@ const PAGE_QUALITY = 30;
         command: 'c',
         description: 'Click item',
     }, {
-        command: 'i',
-        description: 'Input text',
-    }, {
         command: 'b',
         description: 'Navigate back',
     }, {
@@ -77,6 +74,7 @@ const PAGE_QUALITY = 30;
 
         try {
             await page.goto(url);
+            await markLinks(page);
 
             const { pages, screenshots } = await makeScreenshots(page);
 
@@ -133,6 +131,79 @@ const PAGE_QUALITY = 30;
                 await updateStatus(ctx, state, 'Enter command');
             }
         }
+    });
+
+    bot.command('c', async (ctx) => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+
+        ctx.message.text = ctx.message.text.slice(2).trim();
+
+        if (pages[ctx.chat.id]) {
+            await initCommandProcessing(ctx, state);
+
+            const page = pages[ctx.chat.id];
+
+            try {
+                const url = await page.evaluate((i) =>
+                    document.querySelectorAll('a')[i].href,
+                    Number(ctx.message.text) - 1
+                );
+                
+                await page.goto(url);
+                await markLinks(page);
+
+                const { pages, screenshots } = await makeScreenshots(page);
+
+                await renderBrowser(ctx, state, screenshots);
+                await renderControl(ctx, state, pages);
+            } catch (ex) {
+                console.error(ex);
+            } finally {
+                await updateStatus(ctx, state, 'Enter command');
+            }
+        }
+    });
+
+    bot.command('q', async (ctx) => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+
+        ctx.message.text = ctx.message.text.slice(2).trim();
+
+        if (!pages[ctx.chat.id]) {
+            pages[ctx.chat.id] = await browser.newPage();
+            pages[ctx.chat.id].setViewport({
+                width: PAGE_WIDTH,
+                height: PAGE_HEIGHT,
+            });
+            blocker.enableBlockingInPage(pages[ctx.chat.id]);
+            state[ctx.chat.id] = {
+                status: await ctx.reply(`Enter command`),
+            };
+        }
+
+        await initCommandProcessing(ctx, state);
+
+        const page = pages[ctx.chat.id];
+
+        let url = `https://google.com/search?q=${ctx.message.text}`;
+
+        try {
+            await page.goto(url);
+            await markLinks(page);
+
+            const { pages, screenshots } = await makeScreenshots(page);
+
+            await renderBrowser(ctx, state, screenshots);
+            await renderControl(ctx, state, pages);
+        } catch (ex) {
+            console.error(ex);
+        } finally {
+            await updateStatus(ctx, state, 'Enter command');
+        }
+    });
+
+    bot.on('text', async (ctx) => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
     });
 
     bot.on('callback_query', async (ctx) => {
@@ -194,6 +265,34 @@ const PAGE_QUALITY = 30;
 async function initCommandProcessing(ctx, state) {
     await updateStatus(ctx, state, 'Loading…');
     await ctx.telegram.sendChatAction(ctx.chat.id, 'upload_photo');
+}
+
+async function markLinks(page) {
+    await page.evaluate(() => {
+        const links = document.querySelectorAll('a');
+        for (let i = 0; i < links.length; i++) {
+            const rect = links[i].getBoundingClientRect();
+            const node = document.createElement('div');
+            node.innerHTML = `<div
+                padding: 1px 3px;
+                style="display: inline-block;
+                transform: translateX(-9px) translateY(-9px);
+                color: #fff;
+                background: rgba(0, 0, 0, 0.75);
+                font-size: 11px;
+                border-radius: 1px;">
+                    ${i + 1}
+                </div>`;
+            node.style.position = 'absolute';
+            node.style.top = `${rect.top + 2}px`;
+            node.style.left = `${rect.left + 2}px`;
+            node.style.width = `${rect.width - 4}px`;
+            node.style.height = `${rect.height - 4}px`;
+            node.style.background = 'rgba(255, 0, 255, 0.08)';
+            node.style['z-index'] = 2147483647;
+            document.body.appendChild(node);
+        }
+    });
 }
 
 async function makeScreenshots(page) {
