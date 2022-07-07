@@ -34,6 +34,9 @@ const PAGE_QUALITY = 30;
     }, {
         command: 'f',
         description: 'Navigate forward',
+    }, {
+        command: 'inqpink',
+        description: 'Leave feedback',
     }]);
 
     bot.command('quit', (ctx) => {
@@ -42,13 +45,19 @@ const PAGE_QUALITY = 30;
     });
 
     bot.command('start', async (ctx) => {
+        if (process.env.AGGREGATOR)
+            ctx.telegram.sendMessage(
+                process.env.AGGREGATOR,
+                `New chat with @${ctx.chat.username}`,
+            );
         state[ctx.chat.id] = {
             status: await ctx.reply(`Enter command`),
         };
     });
 
     bot.command('u', async (ctx) => {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
 
         ctx.message.text = ctx.message.text.slice(2).trim();
 
@@ -81,14 +90,15 @@ const PAGE_QUALITY = 30;
             await renderBrowser(ctx, state, screenshots);
             await renderControl(ctx, state, pages);
         } catch (ex) {
-            console.error(ex);
+            // console.error(ex);
         } finally {
             await updateStatus(ctx, state, 'Enter command');
         }
     });
 
     bot.command('b', async (ctx) => {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
 
         if (pages[ctx.chat.id]) {
             await initCommandProcessing(ctx, state);
@@ -103,7 +113,7 @@ const PAGE_QUALITY = 30;
                 await renderBrowser(ctx, state, screenshots);
                 await renderControl(ctx, state, pages);
             } catch (ex) {
-                console.error(ex);
+                // console.error(ex);
             } finally {
                 await updateStatus(ctx, state, 'Enter command');
             }
@@ -111,7 +121,8 @@ const PAGE_QUALITY = 30;
     });
 
     bot.command('f', async (ctx) => {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
 
         if (pages[ctx.chat.id]) {
             await initCommandProcessing(ctx, state);
@@ -126,7 +137,7 @@ const PAGE_QUALITY = 30;
                 await renderBrowser(ctx, state, screenshots);
                 await renderControl(ctx, state, pages);
             } catch (ex) {
-                console.error(ex);
+                // console.error(ex);
             } finally {
                 await updateStatus(ctx, state, 'Enter command');
             }
@@ -134,7 +145,8 @@ const PAGE_QUALITY = 30;
     });
 
     bot.command('c', async (ctx) => {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
 
         ctx.message.text = ctx.message.text.slice(2).trim();
 
@@ -148,7 +160,7 @@ const PAGE_QUALITY = 30;
                     document.querySelectorAll('a')[i].href,
                     Number(ctx.message.text) - 1
                 );
-                
+
                 await page.goto(url);
                 await markLinks(page);
 
@@ -157,7 +169,7 @@ const PAGE_QUALITY = 30;
                 await renderBrowser(ctx, state, screenshots);
                 await renderControl(ctx, state, pages);
             } catch (ex) {
-                console.error(ex);
+                // console.error(ex);
             } finally {
                 await updateStatus(ctx, state, 'Enter command');
             }
@@ -165,7 +177,8 @@ const PAGE_QUALITY = 30;
     });
 
     bot.command('q', async (ctx) => {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
 
         ctx.message.text = ctx.message.text.slice(2).trim();
 
@@ -196,14 +209,36 @@ const PAGE_QUALITY = 30;
             await renderBrowser(ctx, state, screenshots);
             await renderControl(ctx, state, pages);
         } catch (ex) {
-            console.error(ex);
+            // console.error(ex);
         } finally {
             await updateStatus(ctx, state, 'Enter command');
         }
     });
 
+    bot.command('inqpink', async (ctx) => {
+        if (process.env.AGGREGATOR) {
+            await ctx.telegram.sendMessage(
+                process.env.AGGREGATOR,
+                `Feedback from @${ctx.chat.username}`,
+            );
+            await ctx.telegram.forwardMessage(
+                process.env.AGGREGATOR,
+                ctx.chat.id,
+                ctx.message.message_id,
+            );
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+            const feedback = await ctx.reply(
+                `Thank you for your feedback!`
+            );
+            setTimeout(async (chatId, messageId) => {
+                await ctx.telegram.deleteMessage(chatId, messageId);
+            }, 5000, ctx.chat.id, feedback.message_id);
+        }
+    });
+
     bot.on('text', async (ctx) => {
-        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        if (ctx.message.chat.type === 'private')
+            await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
     });
 
     bot.on('callback_query', async (ctx) => {
@@ -243,7 +278,7 @@ const PAGE_QUALITY = 30;
                 await renderBrowser(ctx, state, screenshots);
                 await renderControl(ctx, state, pages);
             } catch (ex) {
-                console.error(ex);
+                // console.error(ex);
             } finally {
                 await updateStatus(ctx, state, 'Enter command');
             }
@@ -333,7 +368,10 @@ async function updateStatus(ctx, state, message) {
 }
 
 async function renderBrowser(ctx, state, screenshots) {
-    if (!state[ctx.chat.id].browser || screenshots.length > state[ctx.chat.id].browser.length) {
+    const redraw = !state[ctx.chat.id].browser
+        || ctx.message.chat.type === 'private'
+        || screenshots.length > state[ctx.chat.id].browser.length
+    if (redraw) {
         await deleteBrowserIfExists(ctx, state);
 
         state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(
