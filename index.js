@@ -78,22 +78,7 @@ const PAGE_QUALITY = 30;
         try {
             await page.goto(url);
 
-            const height = await page.evaluate(() =>
-                document.body.scrollHeight
-            );
-            const pages = Math.ceil(height / PAGE_HEIGHT * SCROLL_BY);
-            const screenshots = Array(Math.min(pages, PAGE_LIMIT));
-
-            for (let i = 0; i < screenshots.length; i++) {
-                screenshots[i] = await page.screenshot({
-                    quality: PAGE_QUALITY,
-                    type: 'webp',
-                });
-                await page.evaluate((scrollBy) =>
-                    window.scrollBy({ top: scrollBy }),
-                    Math.trunc(PAGE_HEIGHT * SCROLL_BY)
-                );
-            }
+            const { pages, screenshots } = await makeScreenshots(page);
 
             await renderBrowser(ctx, state, screenshots);
             await renderControl(ctx, state, pages);
@@ -104,8 +89,94 @@ const PAGE_QUALITY = 30;
         }
     });
 
-    bot.on('callback_query', (ctx) => {
-        ctx.reply('Sorry, this feature not implemented yet');
+    bot.command('b', async (ctx) => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+
+        if (pages[ctx.chat.id]) {
+            await initCommandProcessing(ctx, state);
+
+            const page = pages[ctx.chat.id];
+
+            try {
+                await page.goBack();
+
+                const { pages, screenshots } = await makeScreenshots(page);
+
+                await renderBrowser(ctx, state, screenshots);
+                await renderControl(ctx, state, pages);
+            } catch (ex) {
+                console.error(ex);
+            } finally {
+                await updateStatus(ctx, state, 'Enter command');
+            }
+        }
+    });
+
+    bot.command('f', async (ctx) => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+
+        if (pages[ctx.chat.id]) {
+            await initCommandProcessing(ctx, state);
+
+            const page = pages[ctx.chat.id];
+
+            try {
+                await page.goForward();
+
+                const { pages, screenshots } = await makeScreenshots(page);
+
+                await renderBrowser(ctx, state, screenshots);
+                await renderControl(ctx, state, pages);
+            } catch (ex) {
+                console.error(ex);
+            } finally {
+                await updateStatus(ctx, state, 'Enter command');
+            }
+        }
+    });
+
+    bot.on('callback_query', async (ctx) => {
+        if (pages[ctx.chat.id]) {
+            await initCommandProcessing(ctx, state);
+
+            const page = pages[ctx.chat.id];
+            switch (ctx.callbackQuery.data) {
+                case 'top':
+                    await page.evaluate(() =>
+                        window.scrollTo({ top: 0 }),
+                    );
+                    break;
+                case 'up':
+                    await page.evaluate((scrollBy) =>
+                        window.scrollBy({ top: scrollBy }),
+                        Math.trunc(-PAGE_LIMIT * PAGE_HEIGHT * SCROLL_BY),
+                    );
+                    break;
+                case 'down':
+                    await page.evaluate((scrollBy) =>
+                        window.scrollBy({ top: scrollBy }),
+                        Math.trunc(PAGE_LIMIT * PAGE_HEIGHT * SCROLL_BY),
+                    );
+                    break;
+                case 'bottom':
+                    await page.evaluate((scrollSpace) =>
+                        window.scrollTo({ top: Math.max(0, document.body.scrollHeight - scrollSpace) }),
+                        Math.trunc(PAGE_LIMIT * PAGE_HEIGHT * SCROLL_BY),
+                    );
+                    break;
+            }
+
+            try {
+                const { pages, screenshots } = await makeScreenshots(page);
+
+                await renderBrowser(ctx, state, screenshots);
+                await renderControl(ctx, state, pages);
+            } catch (ex) {
+                console.error(ex);
+            } finally {
+                await updateStatus(ctx, state, 'Enter command');
+            }
+        }
     });
 
     bot.launch();
@@ -123,6 +194,34 @@ const PAGE_QUALITY = 30;
 async function initCommandProcessing(ctx, state) {
     await updateStatus(ctx, state, 'Loading…');
     await ctx.telegram.sendChatAction(ctx.chat.id, 'upload_photo');
+}
+
+async function makeScreenshots(page) {
+    const height = await page.evaluate(() =>
+        document.body.scrollHeight
+    );
+    const pages = Math.ceil(height / PAGE_HEIGHT * SCROLL_BY);
+    const screenshots = Array(Math.min(pages, PAGE_LIMIT));
+
+    for (let i = 0; i < screenshots.length; i++) {
+        screenshots[i] = await page.screenshot({
+            quality: PAGE_QUALITY,
+            type: 'webp',
+        });
+        await page.evaluate((scrollBy) =>
+            window.scrollBy({ top: scrollBy }),
+            Math.trunc(PAGE_HEIGHT * SCROLL_BY),
+        );
+    }
+    await page.evaluate((scrollBy) =>
+        window.scrollBy({ top: scrollBy }),
+        Math.trunc(-PAGE_LIMIT * PAGE_HEIGHT * SCROLL_BY),
+    );
+
+    return {
+        pages,
+        screenshots,
+    };
 }
 
 async function updateStatus(ctx, state, message) {
