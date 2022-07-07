@@ -55,8 +55,6 @@ const PAGE_QUALITY = 30;
 
         ctx.message.text = ctx.message.text.slice(2).trim();
 
-        await ctx.telegram.sendChatAction(ctx.chat.id, 'upload_photo');
-
         if (!pages[ctx.chat.id]) {
             pages[ctx.chat.id] = await browser.newPage();
             pages[ctx.chat.id].setViewport({
@@ -69,12 +67,7 @@ const PAGE_QUALITY = 30;
             };
         }
 
-        await ctx.telegram.editMessageText(
-            ctx.chat.id,
-            state[ctx.chat.id].status.message_id,
-            undefined,
-            'Loading…',
-        );
+        await initCommandProcessing(ctx, state);
 
         const page = pages[ctx.chat.id];
 
@@ -102,49 +95,7 @@ const PAGE_QUALITY = 30;
                 );
             }
 
-            if (!state[ctx.chat.id].browser || screenshots.length > state[ctx.chat.id].browser.length) {
-                if (state[ctx.chat.id].browser) {
-                    for (let i = 0; i < state[ctx.chat.id].browser.length; i++) {
-                        await ctx.telegram.deleteMessage(
-                            ctx.chat.id,
-                            state[ctx.chat.id].browser[i].message_id,
-                        );
-                    }
-                    await deleteControlIfExists(ctx, state);
-                }
-
-                state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(
-                    screenshots.map(screenshot => ({
-                        type: 'photo',
-                        media: {
-                            source: screenshot,
-                        },
-                    }))
-                );
-            } else {
-                for (let i = 0; i < screenshots.length; i++) {
-                    await ctx.telegram.editMessageMedia(
-                        ctx.chat.id,
-                        state[ctx.chat.id].browser[i].message_id,
-                        undefined,
-                        {
-                            type: 'photo',
-                            media: {
-                                source: screenshots[i],
-                            },
-                        }
-                    );
-                }
-                if (screenshots.length < state[ctx.chat.id].browser.length) {
-                    for (let i = state[ctx.chat.id].browser.length - 1; i > screenshots.length - 1; i--) {
-                        await ctx.telegram.deleteMessage(
-                            ctx.chat.id,
-                            state[ctx.chat.id].browser[i].message_id,
-                        );
-                    }
-                }
-            }
-
+            await renderBrowser(ctx, state, screenshots);
             await renderControl(ctx, state, pages);
         } catch (ex) {
             console.error(ex);
@@ -169,6 +120,11 @@ const PAGE_QUALITY = 30;
     });
 })();
 
+async function initCommandProcessing(ctx, state) {
+    await updateStatus(ctx, state, 'Loading…');
+    await ctx.telegram.sendChatAction(ctx.chat.id, 'upload_photo');
+}
+
 async function updateStatus(ctx, state, message) {
     await ctx.telegram.editMessageText(
         ctx.chat.id,
@@ -176,6 +132,60 @@ async function updateStatus(ctx, state, message) {
         undefined,
         message,
     );
+}
+
+async function renderBrowser(ctx, state, screenshots) {
+    if (!state[ctx.chat.id].browser || screenshots.length > state[ctx.chat.id].browser.length) {
+        await deleteBrowserIfExists(ctx, state);
+
+        state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(
+            screenshots.map(screenshot => ({
+                type: 'photo',
+                media: {
+                    source: screenshot,
+                },
+            }))
+        );
+    } else {
+        for (let i = 0; i < screenshots.length; i++) {
+            await ctx.telegram.editMessageMedia(
+                ctx.chat.id,
+                state[ctx.chat.id].browser[i].message_id,
+                undefined,
+                {
+                    type: 'photo',
+                    media: {
+                        source: screenshots[i],
+                    },
+                }
+            );
+        }
+        await deleteExtraScreenshots(ctx, state, screenshots);
+    }
+}
+
+async function deleteExtraScreenshots(ctx, state, screenshots) {
+    if (screenshots.length < state[ctx.chat.id].browser.length) {
+        for (let i = state[ctx.chat.id].browser.length - 1; i > screenshots.length - 1; i--) {
+            await ctx.telegram.deleteMessage(
+                ctx.chat.id,
+                state[ctx.chat.id].browser[i].message_id,
+            );
+        }
+        state[ctx.chat.id].browser.splice(screenshots.length);
+    }
+}
+
+async function deleteBrowserIfExists(ctx, state) {
+    if (state[ctx.chat.id].browser) {
+        for (let i = 0; i < state[ctx.chat.id].browser.length; i++) {
+            await ctx.telegram.deleteMessage(
+                ctx.chat.id,
+                state[ctx.chat.id].browser[i].message_id,
+            );
+        }
+        await deleteControlIfExists(ctx, state);
+    }
 }
 
 async function renderControl(ctx, state, pages) {
