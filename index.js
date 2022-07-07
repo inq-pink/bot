@@ -102,13 +102,31 @@ const PAGE_QUALITY = 30;
                 );
             }
 
-            if (!state[ctx.chat.id].browser) {
-                state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(screenshots.map(screenshot => ({
-                    type: 'photo',
-                    media: {
-                        source: screenshot,
-                    },
-                })));
+            if (!state[ctx.chat.id].browser || screenshots.length > state[ctx.chat.id].browser.length) {
+                if (state[ctx.chat.id].browser) {
+                    for (let i = 0; i < state[ctx.chat.id].browser.length; i++) {
+                        await ctx.telegram.deleteMessage(
+                            ctx.chat.id,
+                            state[ctx.chat.id].browser[i].message_id,
+                        );
+                    }
+                    if (state[ctx.chat.id].control) {
+                        await ctx.telegram.deleteMessage(
+                            ctx.chat.id,
+                            state[ctx.chat.id].control.message_id,
+                        );
+                        delete state[ctx.chat.id].control;
+                    }
+                }
+
+                state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(
+                    screenshots.map(screenshot => ({
+                        type: 'photo',
+                        media: {
+                            source: screenshot,
+                        },
+                    }))
+                );
             } else {
                 for (let i = 0; i < screenshots.length; i++) {
                     await ctx.telegram.editMessageMedia(
@@ -122,6 +140,14 @@ const PAGE_QUALITY = 30;
                             },
                         }
                     );
+                }
+                if (screenshots.length < state[ctx.chat.id].browser.length) {
+                    for (let i = state[ctx.chat.id].browser.length - 1; i > screenshots.length - 1; i--) {
+                        await ctx.telegram.deleteMessage(
+                            ctx.chat.id,
+                            state[ctx.chat.id].browser[i].message_id,
+                        );
+                    }
                 }
             }
 
@@ -162,6 +188,14 @@ const PAGE_QUALITY = 30;
                             },
                         }
                     );
+                }
+            } else {
+                if (state[ctx.chat.id].control) {
+                    await ctx.telegram.deleteMessage(
+                        ctx.chat.id,
+                        state[ctx.chat.id].control.message_id,
+                    );
+                    delete state[ctx.chat.id].control;
                 }
             }
         } catch (ex) {
