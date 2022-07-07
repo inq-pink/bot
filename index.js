@@ -17,6 +17,7 @@ const PAGE_QUALITY = 30;
     const blocker = await adblock.PuppeteerBlocker.fromPrebuiltAdsAndTracking(fetch);
 
     const pages = {};
+    const state = {};
 
     bot.telegram.setMyCommands([{
         command: 'u',
@@ -43,75 +44,136 @@ const PAGE_QUALITY = 30;
             ctx.leaveChat();
     });
 
-    bot.on('text', async (ctx) => {
-        if (ctx.message.text === '/start') {
-            ctx.reply(`Enter url`);
-            return;
+    bot.command('start', async (ctx) => {
+        state[ctx.chat.id] = {
+            status: await ctx.reply(`Enter command`),
+        };
+    });
+
+    bot.command('u', async (ctx) => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id);
+
+        ctx.message.text = ctx.message.text.slice(2).trim();
+
+        await ctx.telegram.sendChatAction(ctx.chat.id, 'upload_photo');
+
+        if (!pages[ctx.chat.id]) {
+            pages[ctx.chat.id] = await browser.newPage();
+            pages[ctx.chat.id].setViewport({
+                width: PAGE_WIDTH,
+                height: PAGE_HEIGHT,
+            });
+            blocker.enableBlockingInPage(pages[ctx.chat.id]);
+            state[ctx.chat.id] = {
+                status: await ctx.reply(`Enter command`),
+            };
         }
 
-        if (ctx.message.text.startsWith('/u')) {
-            ctx.message.text = ctx.message.text.slice(2).trim();
+        await ctx.telegram.editMessageText(
+            ctx.chat.id,
+            state[ctx.chat.id].status.message_id,
+            undefined,
+            'Loading…',
+        );
 
-            ctx.telegram.sendChatAction(ctx.chat.id, 'upload_photo');
+        const page = pages[ctx.chat.id];
 
-            let url = ctx.message.text;
-            if (!url.startsWith('http'))
-                url = 'http://' + url;
+        let url = ctx.message.text;
+        if (!url.startsWith('http'))
+            url = 'http://' + url;
 
-            if (!pages[ctx.chat.id]) {
-                pages[ctx.chat.id] = await browser.newPage();
-                pages[ctx.chat.id].setViewport({
-                    width: PAGE_WIDTH,
-                    height: PAGE_HEIGHT,
+        try {
+            await page.goto(url);
+
+            const height = await page.evaluate(() =>
+                document.body.scrollHeight
+            );
+            const pages = Math.ceil(height / PAGE_HEIGHT * SCROLL_BY);
+            const screenshots = Array(Math.min(pages, PAGE_LIMIT));
+
+            for (let i = 0; i < screenshots.length; i++) {
+                screenshots[i] = await page.screenshot({
+                    quality: PAGE_QUALITY,
+                    type: 'webp',
                 });
-                blocker.enableBlockingInPage(pages[ctx.chat.id]);
+                await page.evaluate((scrollBy) =>
+                    window.scrollBy({ top: scrollBy }),
+                    Math.trunc(PAGE_HEIGHT * SCROLL_BY)
+                );
             }
 
-            const page = pages[ctx.chat.id];
-
-            try {
-                await page.goto(url);
-
-                const height = await page.evaluate(() =>
-                    document.body.scrollHeight
-                );
-                const pages = Math.ceil(height / PAGE_HEIGHT * SCROLL_BY);
-                const screenshots = Array(Math.min(pages, PAGE_LIMIT));
-
-                for (let i = 0; i < screenshots.length; i++) {
-                    screenshots[i] = await page.screenshot({
-                        quality: PAGE_QUALITY,
-                        type: 'webp',
-                    });
-                    await page.evaluate((scrollBy) =>
-                        window.scrollBy({ top: scrollBy }),
-                        Math.trunc(PAGE_HEIGHT * SCROLL_BY)
-                    );
-                }
-
-                await ctx.replyWithMediaGroup(screenshots.map(screenshot => ({
+            if (!state[ctx.chat.id].browser) {
+                state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(screenshots.map(screenshot => ({
                     type: 'photo',
                     media: {
                         source: screenshot,
                     },
                 })));
-
-                if (pages > PAGE_LIMIT) {
-                    ctx.telegram.sendMessage(ctx.chat.id, `1 of ${Math.ceil(pages / PAGE_LIMIT)}`, {
-                        reply_markup: {
-                            inline_keyboard: [
-                                [
-                                    { text: 'Scroll top', callback_data: 'load' },
-                                    { text: 'Load more', callback_data: 'load' },
-                                    { text: 'Scroll bottom', callback_data: 'load' },
-                                ]
-                            ],
-                        },
-                    });
+            } else {
+                for (let i = 0; i < screenshots.length; i++) {
+                    await ctx.telegram.editMessageMedia(
+                        ctx.chat.id,
+                        state[ctx.chat.id].browser[i].message_id,
+                        undefined,
+                        {
+                            type: 'photo',
+                            media: {
+                                source: screenshots[i],
+                            },
+                        }
+                    );
                 }
-            } catch { }
-        } else {
-            ctx.reply('Sorry, this feature not implemented yet');
+            }
+
+            if (pages > PAGE_LIMIT) {
+                if (!state[ctx.chat.id].control) {
+                    state[ctx.chat.id].control = await ctx.telegram.sendMessage(
+                        ctx.chat.id,
+                        `1 of ${Math.ceil(pages / PAGE_LIMIT)}`,
+                        {
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [
+                                        { text: 'To top', callback_data: 'top' },
+                                        { text: 'Scroll up', callback_data: 'up' },
+                                        { text: 'Scroll down', callback_data: 'down' },
+                                        { text: 'To bottom', callback_data: 'bottom' },
+                                    ]
+                                ],
+                            },
+                        }
+                    );
+                } else {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        state[ctx.chat.id].control.message_id,
+                        undefined,
+                        `1 of ${Math.ceil(pages / PAGE_LIMIT)}`,
+                        {
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [
+                                        { text: 'To top', callback_data: 'top' },
+                                        { text: 'Scroll up', callback_data: 'up' },
+                                        { text: 'Scroll down', callback_data: 'down' },
+                                        { text: 'To bottom', callback_data: 'bottom' },
+                                    ]
+                                ],
+                            },
+                        }
+                    );
+                }
+            }
+        } catch (ex) {
+            console.error(ex);
+        } finally {
+
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                state[ctx.chat.id].status.message_id,
+                undefined,
+                'Enter command',
+            );
         }
     });
 
