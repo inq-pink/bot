@@ -110,13 +110,7 @@ const PAGE_QUALITY = 30;
                             state[ctx.chat.id].browser[i].message_id,
                         );
                     }
-                    if (state[ctx.chat.id].control) {
-                        await ctx.telegram.deleteMessage(
-                            ctx.chat.id,
-                            state[ctx.chat.id].control.message_id,
-                        );
-                        delete state[ctx.chat.id].control;
-                    }
+                    await deleteControlIfExists(ctx, state);
                 }
 
                 state[ctx.chat.id].browser = await ctx.replyWithMediaGroup(
@@ -151,63 +145,11 @@ const PAGE_QUALITY = 30;
                 }
             }
 
-            if (pages > PAGE_LIMIT) {
-                if (!state[ctx.chat.id].control) {
-                    state[ctx.chat.id].control = await ctx.telegram.sendMessage(
-                        ctx.chat.id,
-                        `1 of ${Math.ceil(pages / PAGE_LIMIT)}`,
-                        {
-                            reply_markup: {
-                                inline_keyboard: [
-                                    [
-                                        { text: 'To top', callback_data: 'top' },
-                                        { text: 'Scroll up', callback_data: 'up' },
-                                        { text: 'Scroll down', callback_data: 'down' },
-                                        { text: 'To bottom', callback_data: 'bottom' },
-                                    ]
-                                ],
-                            },
-                        }
-                    );
-                } else {
-                    await ctx.telegram.editMessageText(
-                        ctx.chat.id,
-                        state[ctx.chat.id].control.message_id,
-                        undefined,
-                        `1 of ${Math.ceil(pages / PAGE_LIMIT)}`,
-                        {
-                            reply_markup: {
-                                inline_keyboard: [
-                                    [
-                                        { text: 'To top', callback_data: 'top' },
-                                        { text: 'Scroll up', callback_data: 'up' },
-                                        { text: 'Scroll down', callback_data: 'down' },
-                                        { text: 'To bottom', callback_data: 'bottom' },
-                                    ]
-                                ],
-                            },
-                        }
-                    );
-                }
-            } else {
-                if (state[ctx.chat.id].control) {
-                    await ctx.telegram.deleteMessage(
-                        ctx.chat.id,
-                        state[ctx.chat.id].control.message_id,
-                    );
-                    delete state[ctx.chat.id].control;
-                }
-            }
+            await renderControl(ctx, state, pages);
         } catch (ex) {
             console.error(ex);
         } finally {
-
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                state[ctx.chat.id].status.message_id,
-                undefined,
-                'Enter command',
-            );
+            await updateStatus(ctx, state, 'Enter command');
         }
     });
 
@@ -226,3 +168,64 @@ const PAGE_QUALITY = 30;
         bot.stop('SIGTERM');
     });
 })();
+
+async function updateStatus(ctx, state, message) {
+    await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        state[ctx.chat.id].status.message_id,
+        undefined,
+        message,
+    );
+}
+
+async function renderControl(ctx, state, pages) {
+    if (pages > PAGE_LIMIT) {
+        await upsertControl(ctx, state, pages);
+    } else {
+        await deleteControlIfExists(ctx, state);
+    }
+}
+
+async function upsertControl(ctx, state, pages) {
+    if (!state[ctx.chat.id].control) {
+        state[ctx.chat.id].control = await ctx.telegram.sendMessage(
+            ctx.chat.id,
+            ...getControl(pages),
+        );
+    } else {
+        await ctx.telegram.editMessageText(
+            ctx.chat.id,
+            state[ctx.chat.id].control.message_id,
+            undefined,
+            ...getControl(pages),
+        );
+    }
+}
+
+function getControl(pages) {
+    return [
+        `1 of ${Math.ceil(pages / PAGE_LIMIT)}`,
+        {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: 'To top', callback_data: 'top' },
+                        { text: 'Scroll up', callback_data: 'up' },
+                        { text: 'Scroll down', callback_data: 'down' },
+                        { text: 'To bottom', callback_data: 'bottom' },
+                    ]
+                ],
+            },
+        }
+    ]
+}
+
+async function deleteControlIfExists(ctx, state) {
+    if (state[ctx.chat.id].control) {
+        await ctx.telegram.deleteMessage(
+            ctx.chat.id,
+            state[ctx.chat.id].control.message_id,
+        );
+        delete state[ctx.chat.id].control;
+    }
+}
